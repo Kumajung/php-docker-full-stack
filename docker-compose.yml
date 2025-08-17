@@ -1,34 +1,61 @@
-version: '3'
+version: "3.8"
+
 services:
   db:
-    image: mysql:latest
+    image: mysql:8.4
+    command: --default-authentication-plugin=mysql_native_password
     environment:
-      - MYSQL_DATABASE=php_docker
-      - MYSQL_USER=php_docker
-      - MYSQL_PASSWORD=password # this should live in a env var
-      - MYSQL_ALLOW_EMPTY_PASSWORD=1 # equivalent to True
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-php_docker}
+      MYSQL_USER: ${MYSQL_USER:-php_docker}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password}
     volumes:
-      - "./db:/docker-entrypoint-initdb.d" # this is how we persist a sql db even when container stops
-  www:
-    image: php:apache
-    volumes:
-      - "./:/var/www/html" # sync the current dir on local machine to the dir of container
-    ports:
-      - 80:80
-      - 443:443 # for future ssl traffic
-  phpmyadmin:
-    image: phpmyadmin/phpmyadmin
-    ports:
-      - 8001:80
-    environment:
-      - PMA_HOST=db
-      - PMA_PORT=3306
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-rootpass}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      - app
 
-  nginx:
-    image: nginx:latest
-    ports:
-      - "11380:11380"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+  www:
+    build:
+      context: .
+      dockerfile: Dockerfile
     depends_on:
-      - www
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: ${MYSQL_DATABASE:-php_docker}
+      DB_USER: ${MYSQL_USER:-php_docker}
+      DB_PASS: ${MYSQL_PASSWORD:-password}
+    # เปลี่ยนเป็น 11380:80 ถ้าต้องการให้เว็บออกพอร์ต 11380
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - app
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      UPLOAD_LIMIT: 256M
+    ports:
+      - "8001:80"
+    networks:
+      - app
+
+volumes:
+  db_data:
+
+networks:
+  app:
+    driver: bridge
